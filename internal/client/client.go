@@ -44,12 +44,14 @@ func (qcc *QCClient)OnEvent(t common.EventType, payload []byte) error {
 			if http, ok := cmd.Payload.(common.HttpRequest); ok {
 				if response, err1 := qcc.sendRequest(http); err1 != nil {
 					return qcc.WriteTo(common.Response{
+						SeqID:      cmd.SeqId,
 						Identifier: qcc.Identifier,
 						Code:       common.ERROR_FOUND,
 						Contents:   err1.Error(),
 					})
 				} else {
 					return qcc.WriteTo(common.Response{
+						SeqID:      cmd.SeqId,
 						Identifier: qcc.Identifier,
 						Code:       common.OK,
 						Contents:   response,

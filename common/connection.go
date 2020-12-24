@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/json"
 	"github.com/lucas-clemente/quic-go"
+	"sync"
 )
 
 const Addr = "0.0.0.0:4242"
@@ -51,6 +52,7 @@ func (rc ResponseCode) String() string {
 
 type Command struct {
 	Identifier string
+	SeqId  int
 	CType      CmdType
 	Payload    interface{}
 }
@@ -62,6 +64,7 @@ func (c *Command) Json() []byte {
 
 type Response struct {
 	Identifier string
+	SeqID int
 	Code       ResponseCode
 	Contents   interface{}
 }
@@ -72,17 +75,28 @@ func (r *Response) Json() []byte {
 }
 
 type QuicConnection struct {
-	Session quic.Session
-	Stream  quic.Stream
+	Session  quic.Session
+	Stream   quic.Stream
 }
 
+type OnEvent func (t EventType, payload []byte) error
+
 func (qc *QuicConnection) IssueCommand(cmd Command) error{
+	finishFlag := make(chan int)
+	ctrl := NewResponseCtrl(finishFlag)
+	cmd.SeqId = ctrl.Sequence
+	Controls.AddControl("", *ctrl)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go ctrl.Start(wg)
+
 	j := cmd.Json()
 	if _, err := NewWriter(qc.Stream).Write(j); err != nil {
 		return err
 	} else {
 		Log.Infof("The command %s is issued successfully", j)
 	}
+	wg.Wait()
 	return nil
 }
 
@@ -160,3 +174,5 @@ func (lm *ListenerMgr) NotifyAll(t EventType, payload []byte) {
 func remove(listeners []Listener, s int) []Listener {
 	return append(listeners[:s], listeners[s+1:]...)
 }
+
+var ListenerManger = ListenerMgr{}

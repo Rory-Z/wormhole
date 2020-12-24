@@ -16,15 +16,16 @@ import (
 )
 
 type WormholeServer struct {
-	BindAddr string
-	ListenMgr  common.Subject
+	BindAddr  string
 }
-
-
 
 func (ws *WormholeServer) OnEvent(t common.EventType, payload []byte) error {
 	if t == common.RESPONSE {
 		common.Log.Printf("Get response from rest %s.", string(payload))
+		resp := common.Response{}
+		if e := json.Unmarshal(payload, &resp); e == nil {
+			common.Controls.SendFinishFlag(resp.Identifier, resp.SeqID)
+		}
 		return nil
 	} else if t == common.COMMAND {
 		cmd := common.Command{}
@@ -82,7 +83,7 @@ func (ws *WormholeServer) ListenToClient(conn *common.QuicConnection) {
 				fmt.Printf("%d %s\n", common.ERROR, fmt.Sprintf("Found error %s when trying to unmarshal data from client %d.", err, conn.Stream.StreamID()))
 			} else {
 				if request["Code"] != nil {
-					ws.ListenMgr.NotifyAll(common.RESPONSE, b)
+					common.ListenerManger.NotifyAll(common.RESPONSE, b)
 				} else if ct := request["CType"]; ct != nil {
 					//Logic for client registration
 					ct1, _ := ct.(float64)
@@ -115,27 +116,13 @@ func (ws *WormholeServer) ListenToClient(conn *common.QuicConnection) {
 						}
 						continue
 					}
-					ws.ListenMgr.NotifyAll(common.COMMAND, b)
+					common.ListenerManger.NotifyAll(common.COMMAND, b)
 				} else {
-					ws.ListenMgr.NotifyAll(common.UNKNOWN, b)
+					common.ListenerManger.NotifyAll(common.UNKNOWN, b)
 				}
 			}
 		}
 	}
-}
-
-func (ws *WormholeServer) IssueCommand(cmd common.Command) error {
-	if conn := common.GetManager()[cmd.Identifier]; &conn == nil {
-		return fmt.Errorf("Cannot find connection for %s", cmd.Identifier)
-	} else {
-		j := cmd.Json()
-		if _, err := common.NewWriter(conn.Stream).Write(j); err != nil {
-			return err
-		} else {
-			common.Log.Infof("The command %s is issued successfully", j)
-		}
-	}
-	return nil
 }
 
 func (ws *WormholeServer) IssueResponse(resp common.Response) error {

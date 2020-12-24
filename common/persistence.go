@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"net/http"
+	"sync"
+	"time"
 )
 
 type Node struct {
@@ -243,4 +245,76 @@ func (request *HttpRequest) ToURL() string {
 type HttpResponse struct {
 	Headers map[string]string
 	Body    []byte
+}
+
+type sequenceIDGenerator struct {
+	sequence int
+	mu sync.Mutex
+}
+
+var generator = &sequenceIDGenerator{}
+
+func (sq *sequenceIDGenerator) inc() int{
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	sq.sequence++
+	return sq.sequence
+}
+
+func GetNextId() int {
+	return generator.inc()
+}
+
+type ResponseCtrl struct {
+	Sequence   int
+	FinishFlag chan int
+	Timeout    int
+	Result     Response
+}
+
+func NewResponseCtrl(fflag chan int)  *ResponseCtrl {
+	return &ResponseCtrl{Sequence:GetNextId(), FinishFlag:fflag, Timeout:10}
+}
+
+func (rc *ResponseCtrl) Start(wg sync.WaitGroup) {
+	for alive := true; alive; {
+		timer := time.NewTimer(time.Duration(rc.Timeout*rc.Timeout))
+		select {
+		case finished := <-rc.FinishFlag:
+			timer.Stop()
+			wg.Done()
+			fmt.Println(finished)
+		case <-timer.C:
+			alive = false
+			Log.Errorf("No response after %d seconds, timeout!", rc.Timeout)
+		}
+	}
+}
+
+type ResponseCtrls map[string][]ResponseCtrl
+
+var Controls = ResponseCtrls{}
+
+func (cs ResponseCtrls) AddControl(id string, ctrl ResponseCtrl) {
+	if ctrls := cs[id]; ctrls != nil {
+		cs[id] = append(ctrls, ctrl)
+	} else {
+		ctrls = []ResponseCtrl{ctrl}
+		cs[id] = ctrls
+	}
+}
+
+func (cs ResponseCtrls) SendFinishFlag(id string, seq int) (*ResponseCtrl, error) {
+	if ctrls := cs[id]; ctrls != nil {
+		newCtrls := []ResponseCtrl{}
+		for idx, ctl := range ctrls {
+			if ctl.Sequence == seq {
+				ctl.FinishFlag <- 1
+				newCtrls = append(ctrls[:idx], ctrls[idx+1:]...)
+				cs[id] = newCtrls
+				return &ctl, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("Cannot find the specified control with id %s & sequence id %d", id, seq)
 }
