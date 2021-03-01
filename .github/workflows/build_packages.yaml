@@ -43,4 +43,4 @@ jobs:
       with:
         repo: wormhole
         path: "_packages/wormhole-*"
-        token: ${{ secrets.AccessToken }}
+        token: ${{ github.token }}
